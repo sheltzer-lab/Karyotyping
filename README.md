@@ -5,8 +5,11 @@ This is the updated karyotyping pipeline for Sheltzer Lab's publications. It use
 
 # Running the script
 
-First, clone the repository using 
-``` git clone https://github.com/sheltzer-lab/Karyotyping.git ```
+To run the script, you can clone this repo and set up the directory
+```
+    git clone https://github.com/sheltzer-lab/Karyotyping.git
+    cd Karyotyping
+```
 
 # Citations
 
