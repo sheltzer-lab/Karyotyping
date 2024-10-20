@@ -1,0 +1,5 @@
+# This does not install CNVkit itself. Use pip to install either a stable release from
+# PyPI (pip install cnvkit)
+name: cnvkit
+dependencies:
+  - cnvkit
