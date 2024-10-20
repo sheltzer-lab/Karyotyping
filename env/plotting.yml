@@ -1,0 +1,12 @@
+name: plotting_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - matplotlib=3.7.1
+  - pandas=1.5.3
+  - numpy=1.24.3
+  - typing-extensions=4.7.1  # For typing support
+  - pyyaml=6.0  # For any YAML file processing
+  - scipy
