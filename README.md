@@ -5,10 +5,9 @@ This is the updated karyotyping pipeline for Sheltzer Lab's publications. It use
 
 # Running the script
 
-To run the script, you can clone this repo and set up the directory
+To run the script, you can directly run the following command once you have downloaded the data files.
 ```
-    git clone https://github.com/sheltzer-lab/Karyotyping.git
-    cd Karyotyping
+    nextflow run https://github.com/sheltzer-lab/Karyotyping.git
 ```
 
 # Citations
