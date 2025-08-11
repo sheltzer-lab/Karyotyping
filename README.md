@@ -1,15 +1,40 @@
-# Karyotyping
-This is the updated karyotyping pipeline for Sheltzer Lab's publications. It uses CNVKit for inferring copy numbers and a modified plotting function from the same tool. 
+# Plotting
+This branch is only for running stand-along python scripts for fixing aberrant copy number calls by the main branch pipeline. 
 
-# Data files
-
-# Running the script
-
-To run the script, you can directly run the following command once you have downloaded the data files.
+#Usage 
 ```
-    nextflow run https://github.com/sheltzer-lab/Karyotyping.git
+Plotting.py <intersect_cnr> <sorted_cns> <cleanname> <output> <correction_regions.json> [highlight_json]
 ```
 
+where 'correction_regions.json' should something like 
+```
+{
+  "5q": {
+    "chromosome": "chr5",
+    "start": 108800000,
+    "end": 181538259,
+    "copy_number": 3
+  },
+"5p": {
+    "chromosome": "chr5",
+    "start": 0,
+    "end": 108800000,
+    "copy_number": 2
+  },
+"8p": {
+    "chromosome": "chr8",
+    "start": 0,
+    "end": 85200000,
+    "copy_number": 2
+  },
+"8q": {
+    "chromosome": "chr8",
+    "start": 85200000,
+    "end": 145138636,
+    "copy_number":3
+  }
+}
+```
 # Citations
 
 1. Talevich, E., Shain, A.H., Botton, T., & Bastian, B.C. (2014). CNVkit: Genome-wide copy number detection and visualization from targeted sequencing. PLOS Computational Biology 12(4):e1004873
