@@ -1,18 +1,5 @@
 #!/usr/bin/env python
 
-"""
-Originally developed by Eric Talevich, University of California.
-Modified by Sanat Mishra & Lu Qiao, 2024.
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
 import matplotlib.pyplot as pyplot
 import matplotlib
 import pandas as pd
@@ -24,6 +11,7 @@ import logging
 import math
 import numpy as np
 import sys
+import json
 
 """Hard-coded parameters for CNVkit. These should not change between runs."""
 # Filter thresholds used in constructing the reference (log2 scale)
@@ -123,37 +111,8 @@ def unpack_range(a_range: Union[str, Sequence]) -> Region:
 """Plotting utilities."""
 MB = 1e-6  # To rescale from bases to megabases
 
-def choose_segment_color(segment, highlight_color, default_bright=True):
-    """Choose a display color based on a segment's CNA status.
-
-    Uses the fields added by the 'call' command. If these aren't present, use
-    `highlight_color` for everything.
-
-    For sex chromosomes, some single-copy deletions or gains might not be
-    highlighted, since sample sex isn't used to infer the neutral ploidies.
-    """
-    neutral_color = TREND_COLOR
-    if "cn" not in segment._fields:
-        # No 'call' info
-        return highlight_color if default_bright else neutral_color
-
-    # Detect copy number alteration
-    expected_ploidies = {"chrY": (0, 1), "Y": (0, 1), "chrX": (1, 2), "X": (1, 2)}
-    if segment.cn not in expected_ploidies.get(segment.chromosome, [2]):
-        return highlight_color
-
-    # Detect regions of allelic imbalance / LOH
-    if (
-        segment.chromosome not in expected_ploidies
-        and "cn1" in segment._fields
-        and "cn2" in segment._fields
-        and (segment.cn1 != segment.cn2)
-    ):
-        return highlight_color
-
-    return neutral_color
     
-def plot_chromosome_dividers(axis, chrom_sizes, pad=None, along="x"):
+def plot_chromosome_dividers(axis, chrom_sizes, pad=None, along="x", y_max=None):
     """Given chromosome sizes, plot divider lines and labels.
 
     Draws black lines between each chromosome, with padding. Labels each chromosome range with the chromosome name,
@@ -191,12 +150,7 @@ def plot_chromosome_dividers(axis, chrom_sizes, pad=None, along="x"):
             axis.axvline(x=xposn, color="k")
         # Use chromosome names as x-axis labels (instead of base positions)
         chrom_names = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,'X','Y']
-        # axis.set_xticks(centers)
-        # axis.set_xticklabels(list(chrom_sizes.keys()), rotation=0)
-        # axis.set_xticklabels(chrom_names, rotation=0)
-        # axis.tick_params(labelsize=15)
-        # axis.tick_params(axis="x", length=0)
-        # axis.get_yaxis().tick_left()
+
         # First, clear the original x-ticks and labels
         axis.xaxis.set_ticks_position('top')    # Move the ticks to the top
         axis.xaxis.set_label_position('top')    # Move the labels to the top
@@ -205,26 +159,15 @@ def plot_chromosome_dividers(axis, chrom_sizes, pad=None, along="x"):
         # Place ticks on the top axis
         axis.tick_params(axis="x", which="both", direction='out')
 
-
         # Alternate the positions of the labels
         for i, (center, label) in enumerate(zip(centers, chrom_names)):
             if i % 2 == 0:
-                axis.text(center, 5.35, label, ha='center', va='top', fontsize=25)
+                axis.text(center, 1.066*y_max, label, ha='center', va='top', fontsize=25)
             else:
-                axis.text(center, 5.2, label, ha='center', va='top', fontsize=25)
+                axis.text(center, 1.033*y_max, label, ha='center', va='top', fontsize=25)
 
         # Ensure y ticks are on the left side of the y-axis
         axis.get_yaxis().tick_left()
-    else:
-        axis.set_ylim(0, curr_offset)
-        for yposn in dividers[:-1]:
-            axis.axhline(y=yposn, color="k")
-        # Use chromosome names as y-axis labels (instead of base positions)
-        axis.set_yticks(centers)
-        axis.set_yticklabels(list(chrom_sizes.keys()))
-        axis.tick_params(labelsize=100)
-        axis.tick_params(axis="y", length=0)
-        axis.get_xaxis().tick_bottom()
 
     return starts
 
@@ -258,48 +201,7 @@ def translate_region_to_bins(region, bins):
     c_bin_starts = bins.data.loc[bins.data.chromosome == chrom, "start"].values
     r_start, r_end = np.searchsorted(c_bin_starts, [start, end])
     return Region(chrom, r_start, r_end)
-
-
-def translate_segments_to_bins(segments, bins):
-    if "probes" in segments and segments["probes"].sum() == len(bins):
-        # Segments and .cnr bins already match
-        return update_binwise_positions_simple(segments)
-
-    logging.warning(
-        "Segments %s 'probes' sum does not match the number of bins in %s",
-        segments.sample_id,
-        bins.sample_id,
-    )
-    # Must re-align segments to .cnr bins
-    _x, segments, _v = update_binwise_positions(bins, segments)
-    return segments
-
-
-def update_binwise_positions_simple(cnarr):
-    start_chunks = []
-    end_chunks = []
-    is_segment = "probes" in cnarr
-    if is_segment:
-        cnarr = cnarr[cnarr["probes"] > 0]
-    for _chrom, c_arr in cnarr.by_chromosome():
-        if is_segment:
-            # Segments -- each row can cover many bins
-            ends = c_arr["probes"].values.cumsum()
-            starts = np.r_[0, ends[:-1]]
-        else:
-            # Bins -- enumerate rows
-            n_bins = len(c_arr)
-            starts = np.arange(n_bins)
-            ends = np.arange(1, n_bins + 1)
-        start_chunks.append(starts)
-        end_chunks.append(ends)
-    return cnarr.as_dataframe(
-        cnarr.data.assign(
-            start=np.concatenate(start_chunks), end=np.concatenate(end_chunks)
-        )
-    )
-
-
+    
 def update_binwise_positions(cnarr, segments=None, variants=None):
     """Convert start/end positions from genomic to bin-wise coordinates.
 
@@ -358,665 +260,9 @@ def update_binwise_positions(cnarr, segments=None, variants=None):
 
     return cnarr, segments, variants
 
-
-def get_repeat_slices(values):
-    """Find the location and size of each repeat in `values`."""
-    # ENH: look into pandas groupby innards
-    offset = 0
-    for idx, (_val, rpt) in enumerate(itertools.groupby(values)):
-        size = len(list(rpt))
-        if size > 1:
-            i = idx + offset
-            slc = slice(i, i + size)
-            yield slc, size
-            offset += size - 1
-
-
 # ________________________________________
 # Utilies used by other modules
 
-
-def cvg2rgb(cvg, desaturate):
-    """Choose a shade of red or blue representing log2-coverage value."""
-    cutoff = 1.33  # Values above this magnitude are shown with max intensity
-    x = min(abs(cvg) / cutoff, 1.0)
-    if desaturate:
-        # Adjust intensity sigmoidally -- reduce near 0, boost near 1
-        # Exponent <1 shifts the fixed point leftward (from x=0.5)
-        x = ((1.0 - math.cos(x * math.pi)) / 2.0) ** 0.8
-        # Slight desaturation of colors at lower coverage
-        s = x**1.2
-    else:
-        s = x
-    if cvg < 0:
-        rgb = (1 - s, 1 - s, 1 - 0.25 * x)  # Blueish
-    else:
-        rgb = (1 - 0.25 * x, 1 - s, 1 - s)  # Reddish
-    return cvg
-
-
-# XXX should this be a CopyNumArray method?
-# or: use by_genes internally
-# or: have by_genes use this internally
-def gene_coords_by_name(probes, names):
-    """Find the chromosomal position of each named gene in probes.
-
-    Returns
-    -------
-    dict
-        Of: {chromosome: [(start, end, gene name), ...]}
-    """
-    names = list(filter(None, set(names)))
-    if not names:
-        return {}
-
-    # Create an index of gene names
-    gene_index = collections.defaultdict(set)
-    for i, gene in enumerate(probes["gene"]):
-        for gene_name in gene.split(","):
-            if gene_name in names:
-                gene_index[gene_name].add(i)
-    # Retrieve coordinates by name
-    all_coords = collections.defaultdict(lambda: collections.defaultdict(set))
-    for name in names:
-        gene_probes = probes.data.take(sorted(gene_index.get(name, [])))
-        if not len(gene_probes):
-            raise ValueError(f"No targeted gene named {name!r} found")
-        # Find the genomic range of this gene's probes
-        start = gene_probes["start"].min()
-        end = gene_probes["end"].max()
-        chrom = core.check_unique(gene_probes["chromosome"], name)
-        # Deduce the unique set of gene names for this region
-        uniq_names = set()
-        for oname in set(gene_probes["gene"]):
-            uniq_names.update(oname.split(","))
-        all_coords[chrom][start, end].update(uniq_names)
-    # Consolidate each region's gene names into a string
-    uniq_coords = {}
-    for chrom, hits in all_coords.items():
-        uniq_coords[chrom] = [
-            (start, end, ",".join(sorted(gene_names)))
-            for (start, end), gene_names in hits.items()
-        ]
-    return uniq_coords
-
-
-def gene_coords_by_range(probes, chrom, start, end, ignore=IGNORE_GENE_NAMES):
-    """Find the chromosomal position of all genes in a range.
-
-    Returns
-    -------
-    dict
-        Of: {chromosome: [(start, end, gene), ...]}
-    """
-    ignore += ANTITARGET_ALIASES
-    # Tabulate the genes in the selected region
-    genes = collections.OrderedDict()
-    for row in probes.in_range(chrom, start, end):
-        name = str(row.gene)
-        if name in genes:
-            genes[name][1] = row.end
-        elif name not in ignore:
-            genes[name] = [row.start, row.end]
-    # Reorganize the data structure
-    return {
-        chrom: [(gstart, gend, name) for name, (gstart, gend) in list(genes.items())]
-    }
-
-def read_bed(infile):
-    """UCSC Browser Extensible Data (BED) format.
-
-    A BED file has these columns::
-
-        chromosome, start position, end position, [gene, strand, other stuff...]
-
-    Coordinate indexing is from 0.
-
-    Sets of regions are separated by "track" lines. This function stops reading
-    after encountering a track line other than the first one in the file.
-    """
-    # ENH: just pd.read_csv, skip 'track'
-    @report_bad_line
-    def _parse_line(line):
-        fields = line.split("\t", 6)
-        chrom, start, end = fields[:3]
-        gene = fields[3].rstrip() if len(fields) >= 4 else "-"
-        strand = fields[5].rstrip() if len(fields) >= 6 else "."
-        return chrom, int(start), int(end), gene, strand
-
-    def track2track(handle):
-        try:
-            firstline = next(handle)
-            if firstline.startswith("browser "):
-                # UCSC Genome Browser feature -- ignore it
-                firstline = next(handle)
-        except StopIteration:
-            pass
-        else:
-            if not firstline.startswith("track"):
-                yield firstline
-            for line in handle:
-                if line.startswith("track"):
-                    break
-                yield line
-
-    with as_handle(infile, "r") as handle:
-        rows = map(_parse_line, track2track(handle))
-        return pd.DataFrame.from_records(
-            rows, columns=["chromosome", "start", "end", "gene", "strand"]
-        )
-
-
-def read_bed3(infile):
-    """3-column BED format: chromosome, start, end."""
-    table = read_bed(infile)
-    return table.loc[:, ["chromosome", "start", "end"]]
-
-
-def read_bed4(infile):
-    """4-column BED format: chromosome, start, end, name."""
-    table = read_bed(infile)
-    return table.loc[:, ["chromosome", "start", "end", "gene"]]
-
-
-def read_bed6(infile):
-    """6-column BED format: chromosome, start, end, name, score, strand."""
-    return NotImplemented
-
-def report_bad_line(line_parser):
-    @functools.wraps(line_parser)
-    def wrapper(line):
-        try:
-            return line_parser(line)
-        except ValueError as exc:
-            raise ValueError("Bad line: %r" % line) from exc
-
-    return wrapper
-
-def read_dict(infile):
-    colnames = [
-        "chromosome",
-        "start",
-        "end",
-        # "file", "md5"
-    ]
-    with as_handle(infile, "r") as handle:
-        rows = _parse_lines(handle)
-        return pd.DataFrame.from_records(rows, columns=colnames)
-        
-def read_gff(infile, tag=r'(Name|gene_id|gene_name|gene)', keep_type=None):
-    """Read a GFF3/GTF/GFF2 file into a DataFrame.
-
-    Works for all three formats because we only try extract the gene name, at
-    most, from column 9.
-
-    Parameters
-    ----------
-    infile : filename or open handle
-        Source file.
-    tag : str
-        GFF attributes tag to use for extracting gene names. In GFF3, this is
-        standardized as "Name", and in GTF it's "gene_id". (Neither spec is
-        consistently followed, so the parser will by default look for eith er
-        of those tags and also "gene_name" and "gene".)
-    keep_type : str
-        If specified, only keep rows with this value in the 'type' field
-        (column 3). In GFF3, these terms are standardized in the Sequence
-        Ontology Feature Annotation (SOFA).
-    """
-    colnames = ['chromosome', 'source', 'type', 'start', 'end',
-                'score', 'strand', 'phase', 'attribute']
-    coltypes = ['str', 'str', 'str', 'int', 'int',
-                'str', 'str', 'str', 'str']
-    dframe = pd.read_csv(infile, sep='\t', comment='#', header=None,
-                         na_filter=False, names=colnames,
-                         dtype=dict(zip(colnames, coltypes)))
-    dframe = (dframe
-              .assign(start=dframe.start - 1,
-                      score=dframe.score.replace('.', 'nan').astype('float'))
-              .sort_values(['chromosome', 'start', 'end'])
-              .reset_index(drop=True))
-    if keep_type:
-        ok_type = (dframe['type'] == keep_type)
-        logging.info("Keeping %d '%s' / %d total records",
-                     ok_type.sum(), keep_type, len(dframe))
-        dframe = dframe[ok_type]
-    if len(dframe):
-        rx = re.compile(tag + r'[= ]"?(?P<gene>\S+?)"?(;|$)')
-        matches = dframe['attribute'].str.extract(rx, expand=True)['gene']
-        if len(matches):
-            dframe['gene'] = matches
-    if 'gene' in dframe.columns:
-        dframe['gene'] = dframe['gene'].fillna('-').astype('str')
-    else:
-        dframe['gene'] = ['-'] * len(dframe)
-    return dframe
-
-
-def read_genepred(infile, exons=False):
-    """Gene Predictions.
-
-    ::
-
-        table genePred
-        "A gene prediction."
-            (
-            string  name;               "Name of gene"
-            string  chrom;              "Chromosome name"
-            char[1] strand;             "+ or - for strand"
-            uint    txStart;            "Transcription start position"
-            uint    txEnd;              "Transcription end position"
-            uint    cdsStart;           "Coding region start"
-            uint    cdsEnd;             "Coding region end"
-            uint    exonCount;          "Number of exons"
-            uint[exonCount] exonStarts; "Exon start positions"
-            uint[exonCount] exonEnds;   "Exon end positions"
-            )
-
-    """
-    raise NotImplementedError
-
-
-def read_genepred_ext(infile, exons=False):
-    """Gene Predictions (Extended).
-
-    The refGene table is an example of the genePredExt format.
-
-    ::
-
-        table genePredExt
-        "A gene prediction with some additional info."
-            (
-            string name;        	"Name of gene (usually transcript_id from GTF)"
-            string chrom;       	"Chromosome name"
-            char[1] strand;     	"+ or - for strand"
-            uint txStart;       	"Transcription start position"
-            uint txEnd;         	"Transcription end position"
-            uint cdsStart;      	"Coding region start"
-            uint cdsEnd;        	"Coding region end"
-            uint exonCount;     	"Number of exons"
-            uint[exonCount] exonStarts; "Exon start positions"
-            uint[exonCount] exonEnds;   "Exon end positions"
-            int score;            	"Score"
-            string name2;       	"Alternate name (e.g. gene_id from GTF)"
-            string cdsStartStat; 	"enum('none','unk','incmpl','cmpl')"
-            string cdsEndStat;   	"enum('none','unk','incmpl','cmpl')"
-            lstring exonFrames; 	"Exon frame offsets {0,1,2}"
-            )
-
-    """
-    raise NotImplementedError
-
-
-def read_refgene(infile, exons=False):
-    """Gene predictions (extended) plus a "bin" column (e.g. refGene.txt)
-
-    Same as genePredExt, but an additional first column of integers with the
-    label "bin", which UCSC Genome Browser uses for optimization.
-    """
-    raise NotImplementedError
-
-
-def read_refflat(infile, cds=False, exons=False):
-    """Gene predictions and RefSeq genes with gene names (e.g. refFlat.txt).
-
-    This version of genePred associates the gene name with the gene prediction
-    information. For example, the UCSC "refFlat" database lists HGNC gene names
-    and RefSeq accessions for each gene, alongside the gene model coordinates
-    for transcription region, coding region, and exons.
-
-    ::
-
-        table refFlat
-        "A gene prediction with additional geneName field."
-            (
-            string  geneName;           "Name of gene as it appears in Genome Browser."
-            string  name;               "Name of gene"
-            string  chrom;              "Chromosome name"
-            char[1] strand;             "+ or - for strand"
-            uint    txStart;            "Transcription start position"
-            uint    txEnd;              "Transcription end position"
-            uint    cdsStart;           "Coding region start"
-            uint    cdsEnd;             "Coding region end"
-            uint    exonCount;          "Number of exons"
-            uint[exonCount] exonStarts; "Exon start positions"
-            uint[exonCount] exonEnds;   "Exon end positions"
-            )
-
-    Parameters
-    ----------
-    cds : bool
-        Emit each gene's CDS region (coding and introns, but not UTRs) instead
-        of the full transcript region (default).
-    exons : bool
-        Emit individual exonic regions for each gene instead of the full
-        transcribed genomic region (default). Mutually exclusive with `cds`.
-
-    """
-    # ENH: choice of regions=('transcript', 'cds', 'exons') instead of flags?
-    if cds and exons:
-        raise ValueError("Arguments 'cds' and 'exons' are mutually exclusive")
-
-    cols_shared = ["gene", "accession", "chromosome", "strand"]
-    converters = None
-    if exons:
-        cols_rest = [
-            "_start_tx",
-            "_end_tx",  # Transcription
-            "_start_cds",
-            "_end_cds",  # Coding region
-            "_exon_count",
-            "exon_starts",
-            "exon_ends",
-        ]
-        converters = {"exon_starts": _split_commas, "exon_ends": _split_commas}
-    elif cds:
-        # Use CDS instead of transcription region
-        cols_rest = [
-            "_start_tx",
-            "_end_tx",
-            "start",
-            "end",
-            "_exon_count",
-            "_exon_starts",
-            "_exon_ends",
-        ]
-    else:
-        cols_rest = [
-            "start",
-            "end",
-            "_start_cds",
-            "_end_cds",
-            "_exon_count",
-            "_exon_starts",
-            "_exon_ends",
-        ]
-    colnames = cols_shared + cols_rest
-    usecols = [c for c in colnames if not c.startswith("_")]
-    # Parse the file contents
-    dframe = pd.read_csv(
-        infile,
-        sep="\t",
-        header=None,
-        na_filter=False,
-        names=colnames,
-        usecols=usecols,
-        dtype={c: str for c in cols_shared},
-        converters=converters,
-    )
-
-    # Calculate values for output columns
-    if exons:
-        dframe = pd.DataFrame.from_records(
-            _split_exons(dframe), columns=cols_shared + ["start", "end"]
-        )
-        dframe["start"] = dframe["start"].astype("int")
-        dframe["end"] = dframe["end"].astype("int")
-
-    return (
-        dframe.assign(start=dframe.start - 1)
-        .sort_values(["chromosome", "start", "end"])
-        .reset_index(drop=True)
-    )
-
-
-def _split_commas(field):
-    return field.rstrip(",").split(",")
-
-
-def _split_exons(dframe):
-    """Split exons into individual rows."""
-    for row in dframe.itertuples(index=False):
-        shared = row[:4]
-        for start, end in zip(row.exon_starts, row.exon_ends):
-            yield shared + (start, end)
-
-def read_interval(infile):
-    """GATK/Picard-compatible interval list format.
-
-    Expected tabular columns:
-        chromosome, start position, end position, strand, gene
-
-    Coordinate indexing is from 1.
-    """
-    dframe = pd.read_csv(
-        infile,
-        sep="\t",
-        comment="@",  # Skip the SAM header
-        names=["chromosome", "start", "end", "strand", "gene"],
-    )
-    dframe.fillna({"gene": "-"}, inplace=True)
-    dframe["start"] -= 1
-    return dframe
-
-
-def read_picard_hs(infile):
-    """Picard CalculateHsMetrics PER_TARGET_COVERAGE.
-
-    The format is BED-like, but with a header row and the columns::
-
-        chrom (str),
-        start, end, length (int),
-        name (str),
-        %gc, mean_coverage, normalized_coverage (float)
-
-    """
-    dframe = pd.read_csv(
-        infile,
-        sep="\t",
-        na_filter=False,
-        dtype={
-            "chrom": "str",
-            "start": "int",
-            "end": "int",
-            "length": "int",
-            "name": "str",
-            "%gc": "float",
-            "mean_coverage": "float",
-            "normalized_coverage": "float",
-        },
-    )
-    dframe.columns = [
-        "chromosome",  # chrom
-        "start",
-        "end",
-        "length",
-        "gene",  # name
-        "gc",  # %gc
-        "depth",
-        "ratio",
-    ]
-    del dframe["length"]
-    dframe["start"] -= 1
-    return dframe
-
-def read_vcf_simple(infile):
-    """Read VCF file without samples."""
-    # ENH: Make all readers return a tuple (header_string, body_table)
-    # ENH: usecols -- need to trim dtypes dict to match?
-    header_lines = []
-    with as_handle(infile, "r") as handle:
-        for line in handle:
-            if line.startswith("##"):
-                header_lines.append(line)
-            else:
-                assert line.startswith("#CHR")
-                header_line = line
-                header_lines.append(line)
-                break
-
-        # Extract sample names from VCF header, keep as column names
-        header_fields = header_line.split("\t")
-        sample_ids = header_fields[9:]
-        colnames = [
-            "chromosome",
-            "start",
-            "id",
-            "ref",
-            "alt",
-            "qual",
-            "filter",
-            "info",
-            "format",
-        ] + sample_ids
-        dtypes = {c: str for c in colnames}
-        dtypes["start"] = int
-        del dtypes["qual"]
-        table = pd.read_csv(
-            handle,
-            sep="\t",
-            header=None,
-            na_filter=False,
-            names=colnames,
-            converters={"qual": parse_qual},
-            dtype=dtypes,
-        )
-    # ENH: do things with filter, info
-    table["start"] -= 1
-    table["end"] = table["info"].apply(parse_end_from_info)
-    set_ends(table)
-    logging.info("Loaded %d plain records", len(table))
-    return table
-
-
-def read_vcf_sites(infile):
-    """Read VCF contents into a DataFrame."""
-    colnames = ["chromosome", "start", "id", "ref", "alt", "qual", "filter", "end"]
-    dtypes = {
-        "chromosome": str,
-        "start": int,
-        "id": str,
-        "ref": str,
-        "alt": str,
-        "filter": str,
-    }
-    table = pd.read_csv(
-        infile,
-        sep="\t",
-        comment="#",
-        header=None,
-        na_filter=False,
-        names=colnames,
-        usecols=colnames,
-        converters={"end": parse_end_from_info, "qual": parse_qual},
-        dtype=dtypes,
-    )
-    # Where END is missing, infer from allele lengths
-    table["start"] -= 1
-    set_ends(table)
-    logging.info("Loaded %d plain records", len(table))
-    return table
-
-
-def parse_end_from_info(info):
-    """Parse END position, if present, from an INFO field."""
-    idx = info.find("END=")
-    if idx == -1:
-        return -1
-    info = info[idx + 4 :]
-    idx = info.find(";")
-    if idx != -1:
-        info = info[:idx]
-    return int(info)
-
-
-def parse_qual(qual):
-    """Parse a QUAL value as a number or NaN."""
-    # ENH: only appy na_filter to this column
-    if qual == ".":
-        return np.nan
-    return float(qual)
-
-
-def set_ends(table):
-    """Set 'end' field according to allele lengths."""
-    need_end_idx = table.end == -1
-    if need_end_idx.any():
-        ref_sz = table.loc[need_end_idx, "ref"].str.len()
-        # TODO handle multiple alts -- split commas & take max len
-        alt_sz = table.loc[need_end_idx, "alt"].str.len()
-        var_sz = alt_sz - ref_sz
-        # TODO XXX if end > start, swap 'em?
-        var_sz = var_sz.clip(lower=0)
-        table.loc[need_end_idx, "end"] = table.loc[need_end_idx, "start"] + var_sz
-
-def read_vcf(
-    infile,
-    sample_id=None,
-    normal_id=None,
-    min_depth=None,
-    skip_reject=False,
-    skip_somatic=False,
-):
-    """Read one tumor-normal pair or unmatched sample from a VCF file.
-
-    By default, return the first tumor-normal pair or unmatched sample in the
-    file.  If `sample_id` is a string identifier, return the (paired or single)
-    sample  matching that ID.  If `sample_id` is a positive integer, return the
-    sample or pair at that index position, counting from 0.
-    """
-    try:
-        vcf_reader = pysam.VariantFile(infile)
-    except Exception as exc:
-        raise ValueError(
-            f"Must give a VCF filename, not open file handle: {exc}"
-        ) from exc
-    if vcf_reader.header.samples:
-        sid, nid = _choose_samples(vcf_reader, sample_id, normal_id)
-        logging.info(
-            "Selected test sample %s and control sample %s",
-            sid,
-            nid if nid else "",
-        )
-        # NB: in-place
-        vcf_reader.subset_samples(list(filter(None, (sid, nid))))
-    else:
-        logging.warning("VCF file %s has no sample genotypes", infile)
-        sid = sample_id
-        nid = None
-
-    columns = [
-        "chromosome",
-        "start",
-        "end",
-        "ref",
-        "alt",
-        "somatic",
-        "zygosity",
-        "depth",
-        "alt_count",
-    ]
-    if nid:
-        columns.extend(["n_zygosity", "n_depth", "n_alt_count"])
-
-    rows = _parse_records(vcf_reader, sid, nid, skip_reject)
-    table = pd.DataFrame.from_records(rows, columns=columns)
-    table["alt_freq"] = table["alt_count"] / table["depth"]
-    if nid:
-        table["n_alt_freq"] = table["n_alt_count"] / table["n_depth"]
-    table = table.fillna({col: 0.0 for col in table.columns[6:]})
-    # Filter out records as requested
-    cnt_depth = cnt_som = 0
-    if min_depth:
-        if table["depth"].any():
-            dkey = "n_depth" if "n_depth" in table.columns else "depth"
-            idx_depth = table[dkey] >= min_depth
-            cnt_depth = (~idx_depth).sum()
-            table = table[idx_depth]
-        else:
-            logging.warning("Depth info not available for filtering")
-    if skip_somatic:
-        idx_som = table["somatic"]
-        cnt_som = idx_som.sum()
-        table = table[~idx_som]
-    logging.info(
-        "Loaded %d records; skipped: %d somatic, %d depth",
-        len(table),
-        cnt_som,
-        cnt_depth,
-    )
-    # return sid, nid, table
-    return table
 
 def read_tab(infile):
     """Read tab-separated data with column names in the first row.
@@ -1035,223 +281,6 @@ def read_tab(infile):
             dframe = d2.copy()
     return dframe
 
-
-def read_seg(
-    infile, sample_id=None, chrom_names=None, chrom_prefix=None, from_log10=False
-):
-    """Read one sample from a SEG file.
-
-    Parameters
-    ----------
-    sample_id : string, int or None
-        If a string identifier, return the sample matching that ID.  If a
-        positive integer, return the sample at that index position, counting
-        from 0. If None (default), return the first sample in the file.
-    chrom_names : dict
-        Map (string) chromosome IDs to names. (Applied before chrom_prefix.)
-        e.g. {'23': 'X', '24': 'Y', '25': 'M'}
-    chrom_prefix : str
-        Prepend this string to chromosome names. (Usually 'chr' or None)
-    from_log10 : bool
-        Convert values from log10 to log2.
-
-    Returns
-    -------
-    DataFrame of the selected sample's segments.
-    """
-    results = parse_seg(infile, chrom_names, chrom_prefix, from_log10)
-    if isinstance(sample_id, int):
-        # Select sample by index number
-        for i, (_sid, dframe) in enumerate(results):
-            if i == sample_id:
-                return dframe
-        else:
-            raise IndexError(f"No sample index {sample_id} found in SEG file")
-
-    elif isinstance(sample_id, str):
-        # Select sample by name
-        for sid, dframe in results:
-            if sid == sample_id:
-                return dframe
-        else:
-            raise IndexError(f"No sample ID '{sample_id}' found in SEG file")
-    else:
-        # Select the first sample
-        sid, dframe = next(results)
-        try:
-            next(results)
-        except StopIteration:
-            pass
-        else:
-            logging.warning(
-                "WARNING: SEG file contains multiple samples; "
-                "returning the first sample '%s'",
-                sid,
-            )
-        return dframe
-
-
-def parse_seg(infile, chrom_names=None, chrom_prefix=None, from_log10=False):
-    """Parse a SEG file as an iterable of samples.
-
-    Coordinates are automatically converted from 1-indexed to half-open
-    0-indexed (Python-style indexing).
-
-    Parameters
-    ----------
-    chrom_names : dict
-        Map (string) chromosome IDs to names. (Applied before chrom_prefix.)
-        e.g. {'23': 'X', '24': 'Y', '25': 'M'}
-    chrom_prefix : str
-        Prepend this string to chromosome names. (Usually 'chr' or None)
-    from_log10 : bool
-        Convert values from log10 to log2.
-
-    Yields
-    ------
-    Tuple of (string sample ID, DataFrame of segments)
-    """
-    # Scan through any leading garbage to find the header
-    with as_handle(infile) as handle:
-        n_tabs = None
-        for line in handle:
-            n_tabs = line.count("\t")
-            if n_tabs == 0:
-                # Skip misc. R output (e.g. "WARNING...") before the header
-                continue
-            if n_tabs == 5:
-                col_names = [
-                    "sample_id",
-                    "chromosome",
-                    "start",
-                    "end",
-                    "probes",
-                    "log2",
-                ]
-            elif n_tabs == 4:
-                col_names = ["sample_id", "chromosome", "start", "end", "log2"]
-            else:
-                raise ValueError(
-                    f"SEG format expects 5 or 6 columns; found {n_tabs + 1}: {line}"
-                )
-            break
-        else:
-            raise ValueError("SEG file contains no data")
-        # Parse the SEG file contents
-        try:
-            dframe = pd.read_csv(
-                handle,
-                sep="\t",
-                names=col_names,
-                header=None,
-                # * pandas.io.common.CParserError: Error
-                #   tokenizing data. C error: Calling
-                #   read(nbytes) on source failed. Try
-                #   engine='python'.
-                engine="python",
-                # * engine='c' only:
-                # na_filter=False,
-                # dtype={
-                #     'sample_id': 'str',
-                #     'chromosome': 'str',
-                #     'start': 'int',
-                #     'end': 'int',
-                #     'log2': 'float'
-                # },
-            )
-            dframe["sample_id"] = dframe["sample_id"].astype("str")
-            dframe["chromosome"] = dframe["chromosome"].astype("str")
-        except CSV_ERRORS as err:
-            raise ValueError(
-                f"Unexpected dataframe contents:\n{err}\n" + next(handle)
-            ) from err
-
-    # Calculate values for output columns
-    if chrom_names:
-        dframe["chromosome"] = dframe["chromosome"].replace(chrom_names)
-    if chrom_prefix:
-        dframe["chromosome"] = dframe["chromosome"].apply(lambda c: chrom_prefix + c)
-    if from_log10:
-        dframe["log2"] *= LOG2_10
-    dframe["gene"] = "-"
-    dframe["start"] -= 1
-    keep_columns = dframe.columns.drop(["sample_id"])
-    for sid, sample in dframe.groupby(by="sample_id", sort=False):
-        yield sid, sample.loc[:, keep_columns]
-
-
-def write_seg(dframe, sample_id=None, chrom_ids=None):
-    """Format a dataframe or list of dataframes as SEG.
-
-    To put multiple samples into one SEG table, pass `dframe` and `sample_id`
-    as equal-length lists of data tables and sample IDs in matching order.
-    """
-    assert sample_id is not None
-    if isinstance(dframe, pd.DataFrame):
-        first = dframe
-        first_sid = sample_id
-        sids = dframes = None
-    else:
-        assert not isinstance(sample_id, str)
-        dframes = iter(dframe)
-        sids = iter(sample_id)
-        first = next(dframes)
-        first_sid = next(sids)
-
-    if chrom_ids in (None, True):
-        chrom_ids = create_chrom_ids(first)
-    results = [format_seg(first, first_sid, chrom_ids)]
-    if dframes is not None:
-        # Unpack matching lists of data and sample IDs
-        results.extend(
-            format_seg(subframe, sid, chrom_ids)
-            for subframe, sid in zip_longest(dframes, sids)
-        )
-    return pd.concat(results)
-
-
-def format_seg(dframe, sample_id, chrom_ids):
-    """Transform `dframe` contents to match SEG format."""
-    assert dframe is not None
-    assert sample_id is not None
-    chroms = dframe.chromosome.replace(chrom_ids) if chrom_ids else dframe.chromosome
-    rename_cols = {"log2": "seg.mean", "start": "loc.start", "end": "loc.end"}
-    # NB: in some programs the "sampleName" column is labeled "ID"
-    reindex_cols = ["ID", "chrom", "loc.start", "loc.end", "seg.mean"]
-    if "probes" in dframe:
-        rename_cols["probes"] = "num.mark"  # or num_probes
-        reindex_cols.insert(-1, "num.mark")
-    return (
-        dframe.assign(ID=sample_id, chrom=chroms, start=dframe.start + 1)
-        .rename(columns=rename_cols)
-        .reindex(columns=reindex_cols)
-    )
-
-
-def create_chrom_ids(segments):
-    """Map chromosome names to integers in the order encountered."""
-    mapping = collections.OrderedDict(
-        (chrom, i + 1)
-        for i, chrom in enumerate(segments.chromosome.drop_duplicates())
-        if str(i + 1) != chrom
-    )
-    return mapping
-
-def read_text(infile):
-    """Text coordinate format: "chr:start-end", one per line.
-
-    Or sometimes: "chrom:start-end gene" or "chrom:start-end REF>ALT"
-
-    Coordinate indexing is assumed to be from 1.
-    """
-    parse_line = report_bad_line(from_label)
-    with as_handle(infile, "r") as handle:
-        rows = [parse_line(line) for line in handle]
-    table = pd.DataFrame.from_records(
-        rows, columns=["chromosome", "start", "end", "gene"]
-    )
-    table["gene"] = table["gene"].replace("", "-")
-    return table
 
 from typing import Callable, Dict, Iterable, Iterator, Mapping, Optional, Sequence, Union
 from collections import OrderedDict
@@ -2016,12 +1045,8 @@ class GenomicArray:
 
 def read_cna(infile, sample_id=None, meta=None):
     """Read a CNVkit file (.cnn, .cnr, .cns) to create a CopyNumArray object."""
-    return read(infile, into=CopyNumArray, sample_id=sample_id, meta=meta)
+    return read(infile, into=CopyNumArray, sample_id=sample_id)
 
-
-def read_ga(infile, sample_id=None, meta=None):
-    """Read a CNVkit file (.cnn, .cnr, .cns) to create a GenomicArray (!) object."""
-    return read(infile, into=GenomicArray, sample_id=sample_id, meta=meta)
 
 def fbase(fname):
     """Strip directory and all extensions from a filename."""
@@ -2046,45 +1071,8 @@ def fbase(fname):
     else:
         base = base.rsplit(".", 1)[0]
     return base
-def read_auto(infile):
-    """Auto-detect a file's format and use an appropriate parser to read it."""
-    if not isinstance(infile, str) and not hasattr(infile, "seek"):
-        raise ValueError(
-                "Can only auto-detect format from filename or " +
-                f"seekable (local, on-disk) files, which {infile} is not")
 
-    fmt = sniff_region_format(infile)
-    if hasattr(infile, "seek"):
-        infile.seek(0)
-    if fmt:
-        logging.info("Detected file format: %s", fmt)
-    else:
-        # File is blank -- simple BED will handle this OK
-        fmt = "bed3"
-    return read(infile, fmt or 'tab')
- 
-READERS = {
-    # Format name, formatter, default target class
-    "auto": (read_auto, GenomicArray),
-    "bed": (read_bed,GenomicArray),
-    "bed3": (read_bed3, GenomicArray),
-    "bed4": (read_bed4, GenomicArray),
-    "bed6": (read_bed6, GenomicArray),
-    "dict": (read_dict, GenomicArray),
-    "gff": (read_gff, GenomicArray),
-    "interval": (read_interval, GenomicArray),
-    "genepred": (read_genepred, GenomicArray),
-    "genepredext": (read_genepred_ext, GenomicArray),
-    "refflat": (read_refflat, GenomicArray),
-    "refgene": (read_refgene, GenomicArray),
-    "picardhs": (read_picard_hs, GenomicArray),
-    "seg": (read_seg, GenomicArray),
-    "tab": (read_tab, GenomicArray),
-    "text": (read_text, GenomicArray),
-    "vcf": (read_vcf, GenomicArray),
-    "vcf-simple": (read_vcf_simple, GenomicArray),
-    "vcf-sites": (read_vcf_sites, GenomicArray),
-}   
+
 
 def get_filename(infile):
     if isinstance(infile, str):
@@ -2093,79 +1081,29 @@ def get_filename(infile):
         # File(-like) handle
         return infile.name
         
-def read(infile, fmt="tab", into=None, sample_id=None, meta=None, **kwargs):
-    """Read tabular data from a file or stream into a genome object.
+def read(infile, into=None, sample_id=None):
+    """Read tab-delimited CN data into a GenomicArray subclass.
+       Always called with (infile, sample_id)."""
+    target_cls = into or GenomicArray
 
-    Supported formats: see `READERS`
+    # Build metadata from inputs
+    fname = get_filename(infile)
+    meta = {"sample_id": sample_id}
+    if fname:
+        meta["filename"] = fname
 
-    If a format supports multiple samples, return the sample specified by
-    `sample_id`, or if unspecified, return the first sample and warn if there
-    were other samples present in the file.
-
-    Parameters
-    ----------
-    infile : handle or string
-        Filename or opened file-like object to read.
-    fmt : string
-        File format.
-    into : class
-        GenomicArray class or subclass to instantiate, overriding the
-        default for the target file format.
-    sample_id : string
-        Sample identifier.
-    meta : dict
-        Metadata, as arbitrary key-value pairs.
-    **kwargs :
-        Additional keyword arguments to the format-specific reader function.
-
-    Returns
-    -------
-    GenomicArray or subclass
-        The data from the given file instantiated as `into`, if specified, or
-        the default base class for the given file format (usually GenomicArray).
-    """
-    if fmt == 'auto':
-        return read_auto(infile)
-
-    if fmt in READERS:
-        reader, suggest_into = READERS[fmt]
-    else:
-        raise ValueError(f"Unknown format: {fmt}")
-
-    if meta is None:
-        meta = {}
-    if "sample_id" not in meta:
-        if sample_id:
-            meta["sample_id"] = sample_id
-        else:
-            fname = get_filename(infile)
-            if fname:
-                meta["sample_id"] = fbase(fname)
-    if "filename" not in meta:
-        fname = get_filename(infile)
-        if fname:
-            meta["filename"] = infile
-    if fmt in ("seg", "vcf") and sample_id is not None:
-        # Multi-sample formats: choose one sample
-        kwargs["sample_id"] = sample_id
+    # Read the table (use helper that drops rows with missing 'log2')
     try:
-        dframe = reader(infile, **kwargs)
+        dframe = read_tab(infile)
     except pd.errors.EmptyDataError:
-        # File is blank/empty, most likely
-        logging.info("Blank %s file?: %s", fmt, infile)
-        dframe = []
-    
-    result = (into or suggest_into)(dframe, meta)
+        logging.info("Blank tab file?: %s", infile)
+        dframe = target_cls._make_blank()  # correct empty schema
+
+    # Instantiate + normalize
+    result = target_cls(dframe, meta)
     result.sort_columns()
     result.sort()
     return result
-    # ENH CategoricalIndex ---
-    # if dframe:
-    # dframe['chromosome'] = pd.Categorical(dframe['chromosome'],
-    #                                      dframe.chromosome.drop_duplicates(),
-    #                                      ordered=True)
-    # Create a multi-index of genomic coordinates (like GRanges)
-    # dframe.set_index(['chromosome', 'start'], inplace=True)
 
 from typing import Iterable, Tuple
 from itertools import takewhile
@@ -2877,20 +1815,18 @@ def do_scatter(
     cnarr,
     segments=None,
     variants=None,
-    show_range=None,
-    show_gene=None,
-    do_trend=False,
-    by_bin=False,
-    window_width=1e6,
     y_min=None,
     y_max=None,
+    do_trend=False,
     fig_size=(18,12),
-    antitarget_marker=None,
     segment_color='black',
     title=None,
-    highlight = False
+    by_bin=True,
+    show_range=None,
+    window_width=1e6,
+    highlight=None,
+    base=2
 ):
-    """Plot probe log2 coverages and segmentation calls together."""
     if by_bin:
         bp_per_bin = sum(c.end.iat[-1] for _, c in cnarr.by_chromosome()) / len(cnarr)
         window_width /= bp_per_bin
@@ -2902,33 +1838,10 @@ def do_scatter(
         orig_mb = MB
         MB = 1
 
-    if not show_gene and not show_range:
-        fig = genome_scatter(
-            cnarr, segments, variants, do_trend, y_min, y_max, title, segment_color,highlight
-        )
-    else:
-        if by_bin:
-            show_range = show_range_bins
-        fig = chromosome_scatter(
-            cnarr,
-            segments,
-            variants,
-            show_range,
-            show_gene,
-            antitarget_marker,
-            do_trend,
-            by_bin,
-            window_width,
-            y_min,
-            y_max,
-            title,
-            'black',
-            highlight
-        )
-
-    if by_bin:
-        # Reset to avoid permanently altering the value of cnvlib.scatter.MB
-        MB = orig_mb
+    fig = genome_scatter(
+        cnarr, segments, variants, do_trend, y_min, y_max, title, segment_color, highlight,base
+    )
+    
     fig.set_dpi(300)
     if fig_size:
         width, height = fig_size
@@ -2945,7 +1858,8 @@ def genome_scatter(
     y_max=None,
     title=None,
     segment_color=SEG_COLOR,
-    highlight = False
+    highlight=None,
+    base=None
 ):
     """Plot all chromosomes, concatenated on one plot."""
     if (cnarr or segments) and variants:
@@ -2964,53 +1878,72 @@ def genome_scatter(
     if title is None:
         title = (cnarr or segments or variants).sample_id
     if cnarr or segments:
-        # axis.set_title(title)
-        axis.set_title(title, loc='left', fontsize=16, pad=20)
+        axis.set_title(title, loc='left', fontsize=30, pad=10)
         axis = cnv_on_genome(
-            axis, cnarr, segments, do_trend, y_min, y_max, segment_color, highlight
-        )
-    else:
-        axis.set_title(f"Variant allele frequencies: {title}", loc='left', fontsize=16, pad=20)
-        chrom_sizes = collections.OrderedDict(
-            (chrom, subarr["end"].max()) for chrom, subarr in variants.by_chromosome()
-        )
-        axis = cnv_on_genome(
-            axis, variants, chrom_sizes, segments, do_trend, segment_color
+            axis, cnarr, segments, do_trend, y_min, y_max, segment_color, highlight, base
         )
     return axis.get_figure()
 
 def highlight_positions(subprobes_filtered, highlight_ranges, highlight_color="blue"):
     """
-    Highlights specified positions on the chromosome.
+    Highlights specified positions on the chromosome based on proportional mapping
+    between genomic coordinates and bin indices.
     
     Parameters:
-    - subprobes_filtered: The filtered probes CopyNumArray.
-    - highlight_ranges: A dictionary where keys are chromosome names and values are
-      lists of tuples specifying the start and end of the range to highlight.
+    - subprobes_filtered: The filtered probes CopyNumArray with index-based positions.
+    - highlight_ranges: A dictionary with genomic coordinates to highlight.
     - highlight_color: The color used to highlight the specified range.
     """
     # Create a new array for colors, initially set to POINT_COLOR
     colors = np.full(len(subprobes_filtered), POINT_COLOR)
 
-    # chr 8 only
-    chr8 = 146259331
-    chr8_bins = 1399
-    chr8_binsize = chr8/chr8_bins
-    if highlight_ranges == None:
+    if highlight_ranges is None:
         subprobes_filtered['color'] = 'black'
         return subprobes_filtered
 
-    for chrom, ranges in highlight_ranges.items():
-        for (start, end) in ranges:
-            start_bin = start//chr8_binsize
-            end_bin = end//chr8_binsize
-            # Highlight the specified range with the highlight color
-            is_in_range = (subprobes_filtered['chromosome'] == chrom) & \
-                          (subprobes_filtered['start'] >= start_bin) & \
-                          (subprobes_filtered['end'] <= end_bin)
-            colors[is_in_range] = highlight_color
+    # Reference chromosome sizes (approximate, in bp)
+    chrom_sizes = {
+        "chr1": 248956422, "chr2": 242193529, "chr3": 198295559, "chr4": 190214555,
+        "chr5": 181538259, "chr6": 170805979, "chr7": 159345973, "chr8": 146364022,
+        "chr9": 138394717, "chr10": 133797422, "chr11": 135086622, "chr12": 133275309,
+        "chr13": 114364328, "chr14": 107043718, "chr15": 101991189, "chr16": 90338345,
+        "chr17": 83257441, "chr18": 80373285, "chr19": 58617616, "chr20": 64444167,
+        "chr21": 46709983, "chr22": 50818468, "chrX": 156040895, "chrY": 57227415
+    }
+
+    # Current chromosome being processed
+    current_chrom = subprobes_filtered['chromosome'].iloc[0] if len(subprobes_filtered) > 0 else None
+    
+    if current_chrom not in highlight_ranges:
+        subprobes_filtered['color'] = POINT_COLOR
+        return subprobes_filtered
+    
+    # Get the total number of bins for this chromosome
+    total_bins = len(subprobes_filtered)
+    
+    # Process highlight ranges for this chromosome
+    for start_pos, end_pos in highlight_ranges[current_chrom]:
+        # Get the chromosome size
+        chrom_size = chrom_sizes.get(current_chrom, None)
+        if not chrom_size:
+            continue
+        
+        # Convert genomic positions to bin indices using proportions
+        # Add a small buffer to ensure all points are included
+        start_proportion = max(0, (start_pos / chrom_size) - 0.005)
+        end_proportion = min(1.0, (end_pos / chrom_size) + 0.005)
+        
+        start_bin = int(start_proportion * total_bins)
+        end_bin = int(end_proportion * total_bins)
+        
+        # Create a mask for all bins in this range
+        bin_indices = np.arange(len(subprobes_filtered))
+        is_in_range = (bin_indices >= start_bin) & (bin_indices <= end_bin)
+        
+        # Apply highlight color to all bins in range
+        colors[is_in_range] = highlight_color
+    
     subprobes_filtered['color'] = colors
-    # Return a copy of the CopyNumArray with an additional 'color' attribute
     return subprobes_filtered
 
 def cnv_on_genome(
@@ -3021,41 +1954,17 @@ def cnv_on_genome(
     y_min=None,
     y_max=None,
     segment_color=SEG_COLOR,
-    highlight = False
+    highlight=None,
+    base=None
 ):
     """Plot bin ratios and/or segments for all chromosomes on one plot."""
     # Configure axes etc.
-
     axis.axhline(color="k")
-    axis.set_ylabel("Copy Number", fontsize=50, labelpad=25)
-    axis.set_xlabel("Chromosome", fontsize=50, labelpad=57) 
-
-    if not (y_min and y_max):
-        if segments:
-            # Auto-scale y-axis according to segment mean-coverage values
-            # (Avoid spuriously low log2 values in HLA and chrY)
-            low_chroms = segments.chromosome.isin(("6", "chr6", "Y", "chrY"))
-            seg_auto_vals = segments[~low_chroms]["log2"].dropna()
-            if not y_min:
-                y_min = (
-                    np.nanmin([seg_auto_vals.min() - 0.2, -1.5])
-                    if len(seg_auto_vals)
-                    else -2.5
-                )
-            if not y_max:
-                y_max = (
-                    np.nanmax([seg_auto_vals.max() + 0.2, 1.5])
-                    if len(seg_auto_vals)
-                    else 2.5
-                )
-        else:
-            if not y_min:
-                y_min = -2.5
-            if not y_max:
-                y_max = 2.5
-    # axis.set_ylim(y_min, y_max)
-    axis.set_ylim(0, y_max)
-    axis.tick_params(axis='y', labelsize=35)
+    axis.set_ylabel("Copy Number", fontsize=30, labelpad=25)
+    axis.set_xlabel("Chromosome", fontsize=30, labelpad=57) 
+    axis.set_ylim(y_min, y_max)
+    axis.tick_params(axis='y', labelsize=30)
+    axis.set_yticks(range(0, y_max + 1))
     
     # Group probes by chromosome (to calculate plotting coordinates)
     if probes:
@@ -3071,11 +1980,11 @@ def cnv_on_genome(
     # Same for segment calls
     chrom_segs = dict(segments.by_chromosome()) if segments else {}
     
-    copy_nums=np.arange(5)
-    ratio_thresholds=np.log2((copy_nums+.5) / 2)
+    copy_nums=np.arange(7)
+    ratio_thresholds=np.log2((copy_nums+.5) / 3)
     # print(ratio_thresholds)
     # Plot points & segments
-    x_starts = plot_chromosome_dividers(axis, chrom_sizes)
+    x_starts = plot_chromosome_dividers(axis, chrom_sizes, y_max=y_max)
     for chrom, x_offset in x_starts.items():
         if probes and chrom in chrom_probes:
             subprobes = chrom_probes[chrom]
@@ -3083,77 +1992,58 @@ def cnv_on_genome(
                 (subprobes['log2'] >= ratio_thresholds[0] - 0.5) & 
                 (subprobes['log2'] <= ratio_thresholds[-1] + 0.5)
             ]
-            
             log2_values = subprobes_filtered['log2']
             original_count = len(subprobes_filtered)
-            # Calculate Z-scores to find outliers
             subprobes_filtered['z_scores'] = zscore(log2_values)
-            # outliers = subprobes_filtered[np.abs(z_scores) > 3]
-            # filtered_out = subprobes_filtered[(subprobes_filtered['z_scores'] <= -3) | (subprobes_filtered['z_scores'] >= 3)]
-            # print(len(filtered_out), filtered_out['log2'].tolist())
-
-            # filtering
             subprobes_filtered = subprobes_filtered[(subprobes_filtered['z_scores'] >= -3) & (subprobes_filtered['z_scores'] <= 3)]
-
-            # filtered_count = len(subprobes_filtered)
-            # filtered_out_count = original_count - filtered_count
-            # filtered_out_percentage = (filtered_out_count / original_count) * 100
-            # print(chrom, filtered_count, filtered_out_count, filtered_out_percentage)
-            
-
             # Highlight specified positions
-            if highlight != False:
+            if highlight is not None:
                 subprobes_filtered = highlight_positions(subprobes_filtered, highlight_ranges=highlight)
+    
             else:
                 subprobes_filtered = highlight_positions(subprobes_filtered, highlight_ranges=None)
-
             x = 0.5 * (subprobes_filtered["start"] + subprobes_filtered["end"]) + x_offset
-
-            # Initialize alpha values to 1 (fully opaque)
             alpha_values = np.ones(len(subprobes_filtered))
-
-            # Define the highlight color used in the highlight_positions function
             highlight_color = "blue"
-
-            # Apply gradient alpha for points that are NOT in the highlighted region
             not_highlighted = subprobes_filtered['color'] != highlight_color
-
-            # Calculate gradients for positive Z-scores
             positive_mask = not_highlighted & (subprobes_filtered['z_scores'] >= 2) & (subprobes_filtered['z_scores'] <= 3)
             alpha_values[positive_mask] = 1 - (subprobes_filtered['z_scores'][positive_mask] - 2) / (3 - 2)
-
-            # Calculate gradients for negative Z-scores
             negative_mask = not_highlighted & (subprobes_filtered['z_scores'] <= -2) & (subprobes_filtered['z_scores'] >= -3)
             alpha_values[negative_mask] = 1 - (abs(subprobes_filtered['z_scores'][negative_mask]) - 2) / (3 - 2)
-
-            # Scatter plot with custom color and alpha values
-            axis.scatter(x, 2 * 2**subprobes_filtered["log2"], marker=".", color=subprobes_filtered['color'], alpha=alpha_values)
-            axis.scatter(x, subprobes_filtered['cn'], marker=".", color='red', alpha=0.2)
-            
+            axis.scatter(x, base * 2**subprobes_filtered["log2"], marker=".", color=subprobes_filtered['color'], alpha=alpha_values)
+            axis.scatter(x, base * 2**subprobes_filtered['log2Seg'], marker=".", color='red', alpha=0.2, s=20)
+            # axis.scatter(x, subprobes_filtered['cn'], marker=".", color='yellow', alpha=0.2, s=20)
     return axis
 
 # Ensure the correct number of arguments are passed
-if len(sys.argv) != 5:
-    sys.exit("Usage: Plotting.py <intersect_cnr> <sorted_cns> <cleanname>")
+if len(sys.argv) < 5 or len(sys.argv) > 7:
+    sys.exit("Usage: Plotting.py <intersect_cnr> <sorted_cns> <cleanname> <output> [highlight_json] [base]")
 
-# Get file paths and sample name from command-line arguments
 intersect_cnr = sys.argv[1]
-sorted_cns = sys.argv[2]
-cleanname = sys.argv[3]
-output = sys.argv[4]
+sorted_cns   = sys.argv[2]
+cleanname    = sys.argv[3]
+output       = sys.argv[4]
 
+highlight_ranges = None
+base = 2  # default
+
+# Optional arguments
+if len(sys.argv) >= 6:
+    arg5 = sys.argv[5]
+    if arg5.endswith(".json"):  # highlight file
+        with open(arg5, 'r') as f:
+            highlight_ranges = json.load(f)
+        if len(sys.argv) == 7:
+            base = int(sys.argv[6])
+    else:  # base directly
+        base = int(arg5)
 
 # Load the .cnr file
 cnr = read_cna(intersect_cnr, sample_id=cleanname)
 cns = read_cna(sorted_cns, sample_id=cleanname)
 
-# Set highlight ranges if needed
-highlight_ranges = {
-    'chr8': [(164523, 7025090),(12152234, 40292990)]
-    }
-
 # Generate the plot
-fig = do_scatter(cnr, segments=cns, title=cleanname, y_min=0, y_max=6, by_bin=True)
+fig = do_scatter(cnr, segments=cns, title=cleanname, y_min=0, y_max=5, by_bin=True, highlight=highlight_ranges, base=base)
 
 # Save the plot to a file
-fig.savefig(output)
+fig.savefig(output, bbox_inches="tight")
