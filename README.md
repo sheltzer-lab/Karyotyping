@@ -10,6 +10,38 @@ To run the script, you can directly run the following command once you have down
     nextflow run https://github.com/sheltzer-lab/Karyotyping.git
 ```
 
+# Replot Branch
+The following features are currently implemented in the `replot` branch:
+
+## Pipeline Entry Points
+
+- **Resume from alignment**: Use `--bamFiles bams.txt` to skip read cleaning  & alignment and start directly from BAM files
+- **Replot mode**: Use `--plot_inputs ***.tsv` to regenerate plots from existing CNV analysis results
+
+## Enhanced Plotting Options
+
+- **Chromosome arm highlighting**: Specify regions of interest using `Highlight_Arm` column in replot mode (e.g., "8p,17q")
+- **Copy number corrections**: Apply manual corrections via `correction_regions.json` files
+- **Flexible y-axis scaling**: Control plot appearance with `--y_log true/false` for logarithmic scaling (default: false)
+- **Custom baseline ploidy**: Set reference ploidy with `--base N` (default: 2)
+
+## Performance Optimizations
+
+- **Local execution for lightweight tasks**: Low-resource processes (`process_low`) now use local executor for improved speed
+- **Improved visualization**: Updated plotting script with enhanced graphics and cleaner output
+
+## Code Quality
+
+- Streamlined codebase with removal of deprecated functions
+- Better error handling and documentation
+
+## Input Format
+- See examples of input files
+
+---
+
+> **Note**: These features are currently available in the `replot` branch. Merge to `main` is planned soon.
+
 # Citations
 
 1. Talevich, E., Shain, A.H., Botton, T., & Bastian, B.C. (2014). CNVkit: Genome-wide copy number detection and visualization from targeted sequencing. PLOS Computational Biology 12(4):e1004873

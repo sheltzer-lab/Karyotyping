@@ -1,0 +1,3 @@
+cleanname	intersect_cnr	sorted_cns	Highlight_Arm	correction_json
+MCF10A_8q_E11_bin50000_highlight	results-default/intersect/MCF10A_8q_E11_bin50000/MCF10A_8q_E11_bin50000.Intersect.cnr	results-default/cnv/MCF10A_8q_E11_bin50000/MCF10A_8q_E11_bin50000.cns	8q	correction_regions.json
+MCF10A_8q_E11_bin50000	results-default/intersect/MCF10A_8q_E11_bin50000/MCF10A_8q_E11_bin50000.Intersect.cnr	results-default/cnv/MCF10A_8q_E11_bin50000/MCF10A_8q_E11_bin50000.cns

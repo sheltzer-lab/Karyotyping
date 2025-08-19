@@ -1,0 +1,20 @@
+{
+  "5q": {
+    "chromosome": "chr5",
+    "start": 148800000,
+    "end": 181538259,
+    "copy_number": 3
+  },
+  "1q": {
+    "chromosome": "chr1",
+    "start": 123400000,
+    "end": 248956422,
+    "copy_number": 2
+},
+  "1p": {
+    "chromosome": "chr1",
+    "start": 0,
+    "end": 153400000,
+    "copy_number": 2
+}
+}

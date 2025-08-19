@@ -1,0 +1,2 @@
+name	bam_path	bai_path
+MCF10A_8q_C41	MCF10A_8q_C41.sorted.bam	MCF10A_8q_C41.sorted.bam.bai
